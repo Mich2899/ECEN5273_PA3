@@ -37,42 +37,50 @@ void error_on_server(int connfd, char* err_msg){
         printf("Error occurred on the server side from %s!\n",err_msg);
         write(connfd, error_msg,strlen(error_msg));
 }
+
 void bad_request(int connfd){
     printf("HTTP 400 Bad Request\n\r");
     char bad_request_msg[]="HTTP 400 Bad Request";
     write(connfd, bad_request_msg,strlen(bad_request_msg));
 }
 
-
-int socket_connect(char* host_nm, in_port_t port){
-        struct hostent *hp;
-        struct sockaddr_in req_addr;
-        int on = 1, sock;
-
-        if((hp = gethostbyname(host_nm)) == NULL){
-            herror("gethostbyname\n");
-            exit(1);
-        }
-        
-        bcopy(hp->h_addr, &req_addr.sin_addr, hp->h_length);
-        req_addr.sin_port = htons(port);
-        req_addr.sin_family = AF_INET;
-        sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-        setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&on, sizeof(int));
-
-        if(sock == -1){
-            perror("setsockopt");
-            exit(1);
-        }
-        
-        if(connect(sock, (struct sockaddr *)&req_addr, sizeof(struct sockaddr_in)) == -1){
-            perror("connect");
-            exit(1);
-
-        }
-        return sock;
+void hostname_not_found(int connfd){
+    printf("HTTP 404 Not Found\n\r");
+    char hostname_not_resolved_msg[]="HTTP 404 Not Found";
+    write(connfd, hostname_not_resolved_msg, strlen(hostname_not_resolved_msg));
 }
 
+int socket_connect(char *host, int connfd){
+	struct hostent *hp;
+	struct sockaddr_in addr;
+	int on = 1, sock;     
+    int sockopt_ret,connect_ret;
+
+	if((hp = gethostbyname(host)) == NULL){
+		herror("gethostbyname");
+		hostname_not_found(connfd);
+	}
+	bcopy(hp->h_addr, &addr.sin_addr, hp->h_length);
+	addr.sin_port = htons(80);                                                  //USED THE DEFAULT PORT 80
+	addr.sin_family = AF_INET;
+	sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+	setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&on, sizeof(int));
+
+    printf("SOCK:%d\n SOCKOPT_RET:%d\n",sock,sockopt_ret);
+
+	if(sock == -1){
+		perror("setsockopt");
+	}
+	
+    connect_ret = connect(sock, (struct sockaddr *)&addr, sizeof(struct sockaddr_in));
+    printf("CONNECT_RET:%d\n",connect_ret);
+    
+    if(connect_ret == -1){
+        perror("connect");
+        exit(1);
+    }
+	return sock;
+}
 
 int main(int argc, char **argv) 
 {
@@ -132,6 +140,11 @@ bool serve_request(char buf[MAXBUF], int connfd)
     char* find_slash=NULL;
     char hostname[100];
     int hostname_size=0;
+    char server_path[1024];
+    char blacklist[MAXBUF];
+    char* blacklist_ret=NULL;
+    int blacklist_fd=0;
+    int rret=0;
 
     int server_sock=0;
     //char filetype_ret[MAXLINE];
@@ -189,35 +202,56 @@ bool serve_request(char buf[MAXBUF], int connfd)
 
                 printf("HOSTNAME:%s\n", hostname);
 
-                //get the message to be sent to server
-                return_for_server = strstr(buf, "\r\n");
+                // //Check if hostname in blacklist
+                // blacklist_fd = open("blacklist.txt", O_RDONLY, 0444);
 
-                strncpy(serve_request_msg, buf, (return_for_server - buf)+2);
+                // while((rret=read(blacklist_fd,blacklist,MAXBUF))>0){
+                //     //printf("BLACKLIST_FILE_DATA: %s\n\r",blacklist);
+                // }
 
-                printf("SERVER_REQUEST_MSG:%s\n",serve_request_msg);
+                // blacklist_ret = strstr(blacklist,hostname);
+                // if(blacklist_ret == NULL){
 
-                server_sock = socket_connect(hostname, input_port);
-                printf("SERVER_SOCKET_FS=%d\n",server_sock);
-                write(server_sock, serve_request_msg, strlen(serve_request_msg));
+                        //get the message to be sent to server
+                        return_for_server = strstr(buf, "\r\n");
 
-                bzero(server_data, MAXBUF);
+                        strncpy(serve_request_msg, buf, (return_for_server - buf)+2);
 
-                while((readret = read(server_sock, server_data, 2000))>0){
-                    fprintf(stderr, "%s", server_data);
-                    printf("%s\n",server_data);
-                    
-                    //write to client
-                    n = write(connfd, server_data, readret);
-                    if(n<0){
-                        perror("Error in write\n\r");
-                        printf("Write error!\n\r");
-                    }
+                        printf("SERVER_REQUEST_MSG:%s\n",serve_request_msg);
 
-                    bzero(server_data, MAXBUF);
-                }
+                        server_sock = socket_connect(hostname, connfd);
+                        printf("SERVER_SOCKET_FS=%d\n",server_sock);
+                        
+                        sprintf(server_path, "%sHost: %s\r\n\r\n",serve_request_msg,hostname);
 
-                shutdown(server_sock, SHUT_RDWR);
-                close(server_sock);
+                        write(server_sock, server_path, strlen(server_path));
+                        //write(server_sock,"GET /\r\n",strlen("GET /\r\n"));
+
+                        bzero(server_data, MAXBUF);
+
+                        while((readret = read(server_sock, server_data, 4000))>0){
+                            fprintf(stderr, "%s", server_data);
+                            printf("%s\n",server_data);
+                            
+                            //write to client
+                            n = write(connfd, server_data, readret);
+                            if(n<0){
+                                perror("Error in write\n\r");
+                                printf("Write error!\n\r");
+                            }
+
+                            bzero(server_data, MAXBUF);
+                        }
+                        printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~CAME OUT~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\r");
+                // }
+
+                // else{
+                //         printf("ERROR 403 Forbidden\n\r");
+                //         write(connfd, "ERROR 403 Forbidden\n\r",strlen("ERROR 403 Forbidden\n\r"));
+                // }
+
+                //shutdown(server_sock, SHUT_RDWR);
+                //close(server_sock);
             }
 
             else{
