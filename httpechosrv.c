@@ -19,6 +19,8 @@
 #include <sys/select.h>
 #include <stdbool.h>
 #include <strings.h>
+#include <netinet/tcp.h>
+
 
 
 #define MAXLINE  8192  /* max text line length */
@@ -28,16 +30,53 @@
 int open_listenfd(int port);
 void echo(int connfd);
 void *thread(void *vargp);
+int input_port=0;
 
 void error_on_server(int connfd, char* err_msg){
         char error_msg[]="HTTP/1.1 500 Internal Server Error";
         printf("Error occurred on the server side from %s!\n",err_msg);
         write(connfd, error_msg,strlen(error_msg));
 }
+void bad_request(int connfd){
+    printf("HTTP 400 Bad Request\n\r");
+    char bad_request_msg[]="HTTP 400 Bad Request";
+    write(connfd, bad_request_msg,strlen(bad_request_msg));
+}
+
+
+int socket_connect(char* host_nm, in_port_t port){
+        struct hostent *hp;
+        struct sockaddr_in req_addr;
+        int on = 1, sock;
+
+        if((hp = gethostbyname(host_nm)) == NULL){
+            herror("gethostbyname\n");
+            exit(1);
+        }
+        
+        bcopy(hp->h_addr, &req_addr.sin_addr, hp->h_length);
+        req_addr.sin_port = htons(port);
+        req_addr.sin_family = AF_INET;
+        sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+        setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&on, sizeof(int));
+
+        if(sock == -1){
+            perror("setsockopt");
+            exit(1);
+        }
+        
+        if(connect(sock, (struct sockaddr *)&req_addr, sizeof(struct sockaddr_in)) == -1){
+            perror("connect");
+            exit(1);
+
+        }
+        return sock;
+}
+
 
 int main(int argc, char **argv) 
 {
-    int listenfd, *connfdp, port, clientlen=sizeof(struct sockaddr_in);
+    int listenfd, *connfdp, clientlen=sizeof(struct sockaddr_in);
     struct sockaddr_in clientaddr;
     pthread_t tid; 
 
@@ -45,13 +84,13 @@ int main(int argc, char **argv)
 	fprintf(stderr, "usage: %s <port>\n", argv[0]);
 	exit(0);
     }
-    port = atoi(argv[1]);
+    input_port = atoi(argv[1]);
 
-    listenfd = open_listenfd(port);
+    listenfd = open_listenfd(input_port);
     while (1) {
-	connfdp = malloc(sizeof(int));
-	*connfdp = accept(listenfd, (struct sockaddr*)&clientaddr, (socklen_t * restrict)&clientlen);
-	pthread_create(&tid, NULL, thread, connfdp);
+        connfdp = malloc(sizeof(int));
+        *connfdp = accept(listenfd, (struct sockaddr*)&clientaddr, (socklen_t * restrict)&clientlen);
+        pthread_create(&tid, NULL, thread, connfdp);
     }
 }
 
@@ -79,12 +118,22 @@ bool serve_request(char buf[MAXBUF], int connfd)
     char version[20]={0};
     ssize_t readret;
     int filename_index; 
+    int filename_size=0;
     int file_fd;
     char filename[MAXBUF];   
     char file_buf[MAXBUF]; 
     char err_msg[100]={0};
     bool con_status=false;
     char* return_case=NULL;
+    char serve_request_msg[100];
+    char* return_for_server=NULL;
+    char server_data[MAXBUF];
+    char* hostname_ret=NULL;
+    char* find_slash=NULL;
+    char hostname[100];
+    int hostname_size=0;
+
+    int server_sock=0;
     //char filetype_ret[MAXLINE];
 
     //     //check if the request has connection:keep alive message
@@ -96,208 +145,83 @@ bool serve_request(char buf[MAXBUF], int connfd)
 
             if((strncmp(buf, "GET", 3))==0){
 
-                strcpy(err_msg,"GET\n");
-                /*version extract*/
+                int error_cnt=0;
+
+                strncpy(err_msg,"GET\n",4);
+
+                // /*version extract*/
                 ver_ret=strstr(buf,"HTTP");
-                strncpy(version, ver_ret+5,3);
-                //printf("************************************************\n");
-                //printf("VERSION: %s\n", version);
 
-                //error check
-                if((strncmp(version,"1.1",3)!=0)&&(strncmp(version,"1.0",3)!=0))
-                    goto ERROR;
-
-                //appending with www
-                strncpy(filename,"www",3);
-                /*filename extract*/
-                filename_ret=strstr(buf+4," ");
-                strncpy(filename+3,buf+4,(filename_ret-(buf+4)));
-                printf("FILENAME: %s\n",filename);
-
-                /*open file*/
-                file_fd = open(filename, O_RDONLY, 0444);
+                // strncpy(version, ver_ret+5,3);
                 
-                //error check
-                if(file_fd<0)
-                    goto ERROR;
+                // //error check
+                // if((strncmp(version,"1.1",3)!=0)&&(strncmp(version,"1.0",3)!=0))
+                //     error_cnt++;
 
-                int fstatret=fstat(file_fd, &finfo);
-                //fstat to get file data
-                if(fstatret<0){
-                    perror("File does not exist!\n");
-                    goto ERROR;
+                //Find the domain name
+                hostname_ret = strstr(buf, "http");
+
+                //find link and then extract domain name
+                if(hostname_ret == NULL){
+
+                    filename_size = (ver_ret - (buf+4))-1;
+                    strncpy(filename, buf+4, filename_size);
                 }
 
-                /*find file type*/
-                char* filetype_ret= strrchr(filename,'.');
-                //strncpy(filetype_ret,ret_filetype,strlen(ret_filetype));
-                printf("FILETYPE_RET:%s\n",filetype_ret);
-
-                if(con_status==true){
-                    if((strncmp(filetype_ret,".html",5))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:text/html\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".txt",4))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:text/plain\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".png",4))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:image/png\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".gif",4))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:image/gif\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".jpg",4))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:image/jpg\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".css",4))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:text/css\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".js",3))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:application/javascript\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,(finfo.st_size));
-                    }                    
-                }
                 else{
-                    if((strncmp(filetype_ret,".html",5))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:text/html\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".txt",4))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:text/plain\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".png",4))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:image/png\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".gif",4))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:image/gif\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".jpg",4))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:image/jpg\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".css",4))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:text/css\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,(finfo.st_size));
-                    }
-                    else if((strncmp(filetype_ret,".js",3))==0){
-                        sprintf(msg, "HTTP/%s 200 Document Follows\r\n Content-Type:application/javascript\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,(finfo.st_size));
-                    }
-                }
-                    printf("server returning a http message with the following content.\n%s\n",msg);
-                write(connfd, msg, strlen(msg));
 
-
-                while((readret = read(file_fd, file_buf, MAXLINE))>0){
-                    n=write(connfd, file_buf, readret);
-                    if(n<0){
-                        perror("Error in write\n");
-                        goto ERROR;
-                    }
+                    filename_size = (ver_ret - (hostname_ret+7))-1;
+                    strncpy(filename, hostname_ret+7, filename_size);
                 }
 
-            }
-
-            else if((strncmp(buf, "POST", 4))==0){
-
-                strcpy(err_msg,"POST");
-                /*version extract*/
-                ver_ret=strstr(buf,"HTTP");
-                strncpy(version, ver_ret+5,3);
-                //printf("************************************************\n");
-                //printf("VERSION: %s\n", version);
-
-                //error check
-                if((strncmp(version,"1.1",3)!=0)&&(strncmp(version,"1.0",3)!=0))
-                    goto ERROR;        
-
-                //appending with www
-                strncpy(filename,"www",3);
-                /*filename extract*/
-                filename_ret=strstr(buf+5," ");
-                strncpy(filename+3,buf+5,(filename_ret-(buf+5)));
                 printf("FILENAME: %s\n",filename);
 
-                post_ret=strrchr(buf,'\n');
-                post_ret++;
-                strncpy(post_data,post_ret,strlen(post_ret));
+                //just to extract domain name
+                find_slash = strstr(filename, "/");
 
-                /*open file*/
-                file_fd = open(filename, O_RDONLY, 0444);
-
-                //error check
-                if(file_fd<0)
-                    goto ERROR;        
-
-                int fstatret=fstat(file_fd, &finfo);
-                //fstat to get file data
-                if(fstatret<0){
-                perror("File does not exist!\n");
-                goto ERROR;
-                }
-
-                /*find file type*/
-                char* filetype_ret= strrchr(filename,'.');
-                //strncpy(filetype_ret,ret_filetype,strlen(ret_filetype));
-                if(con_status==true){
-                    if((strncmp(filetype_ret,".html",5))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:text/html\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".txt",4))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:text/plain\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".png",4))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:image/png\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".gif",4))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:image/gif\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".jpg",4))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:image/jpg\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".css",4))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:text/css\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".js",3))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:application/javascript\r\n Content-Length: %ld\r\n Connection: Keep-alive\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }                    
+                if(find_slash == NULL){
+                    strncpy(hostname,filename,strlen(filename));
                 }
                 else{
-                    if((strncmp(filetype_ret,".html",5))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:text/html\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".txt",4))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:text/plain\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".png",4))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:image/png\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".gif",4))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:image/gif\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".jpg",4))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:image/jpg\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".css",4))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:text/css\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
-                    else if((strncmp(filetype_ret,".js",3))==0){
-                        sprintf(msg, "HTTP/%s 200 OK\r\n Content-Type:application/javascript\r\n Content-Length: %ld\r\n Connection: Close\r\n\r\n",version,((finfo.st_size)+33+strlen(post_ret)));
-                    }
+                    hostname_size = find_slash - filename;
+                    strncpy(hostname, filename, hostname_size);
                 }
-                    printf("server returning a http message with the following content.\n%s\n",msg);
-                write(connfd, msg, strlen(msg));
 
-                sprintf(post_msg,"<html><body><pre><h1>%s </h1></pre>",post_data);
-                write(connfd, post_msg, strlen(post_msg));
+                printf("HOSTNAME:%s\n", hostname);
 
-                while((readret = read(file_fd, file_buf, MAXLINE))>0){
-                    n=write(connfd, file_buf, readret);
+                //get the message to be sent to server
+                return_for_server = strstr(buf, "\r\n");
+
+                strncpy(serve_request_msg, buf, (return_for_server - buf)+2);
+
+                printf("SERVER_REQUEST_MSG:%s\n",serve_request_msg);
+
+                server_sock = socket_connect(hostname, input_port);
+                printf("SERVER_SOCKET_FS=%d\n",server_sock);
+                write(server_sock, serve_request_msg, strlen(serve_request_msg));
+
+                bzero(server_data, MAXBUF);
+
+                while((readret = read(server_sock, server_data, 2000))>0){
+                    fprintf(stderr, "%s", server_data);
+                    printf("%s\n",server_data);
+                    
+                    //write to client
+                    n = write(connfd, server_data, readret);
                     if(n<0){
-                        perror("Error in write\n");
-                        goto ERROR;
+                        perror("Error in write\n\r");
+                        printf("Write error!\n\r");
                     }
+
+                    bzero(server_data, MAXBUF);
                 }
 
+                shutdown(server_sock, SHUT_RDWR);
+                close(server_sock);
             }
 
             else{
-ERROR:          error_on_server(connfd,msg);
+                  bad_request(connfd);
             }            
 
         return con_status;
@@ -309,56 +233,54 @@ void echo(int connfd)
 {
     size_t n;
     char buf[MAXLINE]; 
-    bool con_status=false;
+    bool connection_status=false;
     fd_set rfds;
     struct timeval tv;
     int retval;
     int select_flag=0;
     int timeout_flag=0;
 
-//     // strcpy(buf,httpmsg);
-//    printf("server returning a http message with the following content.\n%s\n",buf);
-   // write(connfd, buf,strlen(httpmsg));
+
 
     n = read(connfd, buf, MAXLINE);
-    //printf("server received the following request:\n%s\n",buf);
-    con_status = serve_request(buf,connfd);
+    printf("server received the following request:\n%s\n",buf);
+    connection_status = serve_request(buf,connfd);
 
     bzero(buf,MAXLINE);
     //make a while loop here there keeps on checking "connection:keep alive" in the incoming request 
-    while(con_status==true){
-           printf("In while!\n");
+    // while(connection_status == true){
+    //        //printf("In while!\n");
 
-           /* Watch stdin (fd 0) to see when it has input. */
+    //        /* Watch stdin (fd 0) to see when it has input. */
 
-           FD_ZERO(&rfds);
-           FD_SET(connfd, &rfds);
+    //        FD_ZERO(&rfds);
+    //        FD_SET(connfd, &rfds);
 
-           /* Wait up to five seconds. */
+    //        /* Wait up to five seconds. */
 
-           tv.tv_sec = 10;
-           tv.tv_usec = 0;
+    //        tv.tv_sec = 10;
+    //        tv.tv_usec = 0;
 
-           retval = select(connfd+1, &rfds, NULL, NULL, &tv);
-           /* Don't rely on the value of tv now! */
+    //        retval = select(connfd+1, &rfds, NULL, NULL, &tv);
+    //        /* Don't rely on the value of tv now! */
 
-           if (retval == -1){
-               printf("Negative return value on select!!\n");
-           }
-           else if (retval && FD_ISSET(connfd,&rfds)){
-               /* FD_ISSET(0, &rfds) will be true. */
+    //        if (retval == -1){
+    //            printf("Negative return value on select!!\n");
+    //        }
+    //        else if (retval && FD_ISSET(connfd,&rfds)){
+    //            /* FD_ISSET(0, &rfds) will be true. */
 
-                n = read(connfd, buf, MAXLINE);
-                printf("server received the following request:\n%s\n",buf);
+    //             n = read(connfd, buf, MAXLINE);
+    //             printf("server received the following request:\n%s\n",buf);
                                 
-                con_status = serve_request(buf,connfd);
-           }
-           else{
-               printf("Timed out!!!!!!!\n");
-               break;
-           }
-           bzero(buf,MAXLINE);
-    }
+    //             connection_status = serve_request(buf,connfd);
+    //        }
+    //        else{
+    //            printf("Timed out!!!!!!!\n");
+    //            break;
+    //        }
+    //        bzero(buf,MAXLINE);
+    // }
 
 
 }

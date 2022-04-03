@@ -1,10 +1,10 @@
 CC=gcc
 CFLAGS =
 
-all:	webserver
+all:	proxy
 
-webserver:	httpechosrv.c
-	$(CC) $(CFLAGS) -o webserver httpechosrv.c
+proxy:	httpechosrv.c
+	$(CC) $(CFLAGS) -o proxy httpechosrv.c
 
 clean:
-	rm -rf webserver
+	rm -rf proxy
