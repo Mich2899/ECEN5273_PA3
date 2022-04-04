@@ -26,6 +26,9 @@
 #define MAXLINE  8192  /* max text line length */
 #define MAXBUF   8192  /* max I/O buffer size */
 #define LISTENQ  1024  /* second argument to listen() */
+#define IPCACHE_FILE "ipcache_list.txt"
+#define PAGE_CACHE_FILE "pagecache_list.txt"
+#define PAGE "PAGE"
 
 int open_listenfd(int port);
 void echo(int connfd);
@@ -55,29 +58,120 @@ int socket_connect(char *host, int connfd){
 	struct sockaddr_in addr;
 	int on = 1, sock;     
     int sockopt_ret,connect_ret;
+    char* addr_str;
+    int blackfd=0;
+    char blacklist[MAXBUF];
+    char* blacklist_ret=NULL;
+    int rret=0;
+    int ipcache_fd=0;
+    char domain_ip_set[MAXBUF];
+    int ipread_ret=0;
+    char ipcache_list[MAXBUF];
+    char* ipcache_list_ret=NULL;
+    char* ipstr=NULL;char* ipstr1=NULL;
+    char ip_in_str[100];
+    int aton_ret=0;
 
-	if((hp = gethostbyname(host)) == NULL){
-		herror("gethostbyname");
-		hostname_not_found(connfd);
-	}
-	bcopy(hp->h_addr, &addr.sin_addr, hp->h_length);
-	addr.sin_port = htons(80);                                                  //USED THE DEFAULT PORT 80
-	addr.sin_family = AF_INET;
-	sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-	setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&on, sizeof(int));
+    ipcache_fd = open(IPCACHE_FILE,O_CREAT|O_RDWR|O_APPEND, 0777);
+    ipread_ret = read(ipcache_fd, ipcache_list, MAXBUF);
+    close(ipcache_fd);
 
-    printf("SOCK:%d\n SOCKOPT_RET:%d\n",sock,sockopt_ret);
+    ipcache_list_ret = strstr(ipcache_list,host);
+    if(ipcache_list_ret == NULL){
+        printf("GOES TO DO GETHOSTBYNAME\n\r");
 
-	if(sock == -1){
-		perror("setsockopt");
-	}
-	
-    connect_ret = connect(sock, (struct sockaddr *)&addr, sizeof(struct sockaddr_in));
-    printf("CONNECT_RET:%d\n",connect_ret);
-    
-    if(connect_ret == -1){
-        perror("connect");
-        exit(1);
+        if((hp = gethostbyname(host)) == NULL){
+            herror("gethostbyname");
+            hostname_not_found(connfd);
+            sock=-1;
+        }
+
+        else{
+            bcopy(hp->h_addr, &addr.sin_addr, hp->h_length);
+            addr.sin_port = htons(80);                                                  //USED THE DEFAULT PORT 80
+            addr.sin_family = AF_INET;
+
+            //Check if hostname in blacklist
+            blackfd = open("blacklist.txt", O_RDONLY, 0444);
+
+            rret=read(blackfd,blacklist,MAXBUF);
+            if(rret<=0){
+                printf("BLACKLIST EMPTY\n\r");
+                exit(0);
+            }
+            //printf("BLACKLIST_FILE_DATA: %s\n\r",blacklist);
+
+            close(blackfd);   
+
+            addr_str = inet_ntoa(addr.sin_addr);
+
+            blacklist_ret = strstr(blacklist, addr_str);  
+            
+            if(blacklist_ret == NULL){   
+
+                ipcache_fd = open(IPCACHE_FILE,O_CREAT|O_RDWR|O_APPEND, 0777);
+                sprintf(domain_ip_set, "%s\n%s\n\r", host,addr_str);
+                write(ipcache_fd,domain_ip_set,strlen(domain_ip_set));
+
+                close(ipcache_fd);
+
+                sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+                setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&on, sizeof(int));
+
+                printf("SOCK:%d\n SOCKOPT_RET:%d\n",sock,sockopt_ret);
+
+                if(sock == -1){
+                    perror("setsockopt");
+                }
+                
+                connect_ret = connect(sock, (struct sockaddr *)&addr, sizeof(struct sockaddr_in));
+                printf("CONNECT_RET:%d\n",connect_ret);
+                
+                if(connect_ret == -1){
+                    perror("connect");
+                    exit(1);
+                }
+            }
+
+            else{
+
+                printf("ERROR 403 Forbidden\n\r");
+                write(connfd, "ERROR 403 Forbidden\n\r",strlen("ERROR 403 Forbidden\n\r"));            
+            
+            }
+        }
+
+    }
+
+    else{
+
+            printf("GOES TO DO GET IP FROM CACHE LIST\n\r");
+
+            ipstr = strstr(ipcache_list_ret,"\n");
+            ipstr1 = strstr(ipcache_list_ret,"\n\r");
+
+            strncpy(ip_in_str, ipstr+1, (ipstr1-(ipstr+1)));
+
+            aton_ret = inet_aton(ip_in_str,&addr.sin_addr);
+            addr.sin_port = htons(80);                                                  //USED THE DEFAULT PORT 80
+            addr.sin_family = AF_INET;            
+
+            sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&on, sizeof(int));
+
+            printf("SOCK:%d\n SOCKOPT_RET:%d\n",sock,sockopt_ret);
+
+            if(sock == -1){
+                perror("setsockopt");
+            }
+            
+            connect_ret = connect(sock, (struct sockaddr *)&addr, sizeof(struct sockaddr_in));
+            printf("CONNECT_RET:%d\n",connect_ret);
+            
+            if(connect_ret == -1){
+                perror("connect");
+                exit(1);
+            }
     }
 	return sock;
 }
@@ -145,6 +239,18 @@ bool serve_request(char buf[MAXBUF], int connfd)
     char* blacklist_ret=NULL;
     int blacklist_fd=0;
     int rret=0;
+    int ipcache_fd=0;
+    char ipcache_list[MAXBUF];
+    int ip_read_ret=0;
+    char* list_ret=NULL;
+    int page_cache_fd=0;
+    char page_cache_list[MAXBUF];
+    int page_cache_read_ret=0;
+    char* page_cache_ret=NULL;
+    int page_no=0;
+    char page_request[MAXBUF];
+    int page_no_fd=0;
+    char PAGE_SAVE[MAXBUF];
 
     int server_sock=0;
     //char filetype_ret[MAXLINE];
@@ -202,15 +308,20 @@ bool serve_request(char buf[MAXBUF], int connfd)
 
                 printf("HOSTNAME:%s\n", hostname);
 
-                // //Check if hostname in blacklist
-                // blacklist_fd = open("blacklist.txt", O_RDONLY, 0444);
+                //Check if hostname in blacklist
+                blacklist_fd = open("blacklist.txt", O_RDONLY, 0444);
 
-                // while((rret=read(blacklist_fd,blacklist,MAXBUF))>0){
-                //     //printf("BLACKLIST_FILE_DATA: %s\n\r",blacklist);
-                // }
+                rret=read(blacklist_fd,blacklist,MAXBUF);
+                if(rret<=0){
+                    printf("BLACKLIST EMPTY\n\r");
+                    exit(0);
+                }
+                //printf("BLACKLIST_FILE_DATA: %s\n\r",blacklist);
 
-                // blacklist_ret = strstr(blacklist,hostname);
-                // if(blacklist_ret == NULL){
+                close(blacklist_fd);
+
+                blacklist_ret = strstr(blacklist,hostname);
+                if(blacklist_ret == NULL){
 
                         //get the message to be sent to server
                         return_for_server = strstr(buf, "\r\n");
@@ -222,33 +333,55 @@ bool serve_request(char buf[MAXBUF], int connfd)
                         server_sock = socket_connect(hostname, connfd);
                         printf("SERVER_SOCKET_FS=%d\n",server_sock);
                         
-                        sprintf(server_path, "%sHost: %s\r\n\r\n",serve_request_msg,hostname);
+                        if(server_sock>0){
 
-                        write(server_sock, server_path, strlen(server_path));
-                        //write(server_sock,"GET /\r\n",strlen("GET /\r\n"));
+                            sprintf(server_path, "%sHost: %s\r\n\r\n",serve_request_msg,hostname);
 
-                        bzero(server_data, MAXBUF);
-
-                        while((readret = read(server_sock, server_data, 4000))>0){
-                            fprintf(stderr, "%s", server_data);
-                            printf("%s\n",server_data);
+                            //check if page is already requested
+                            page_cache_fd = open(PAGE_CACHE_FILE, O_CREAT|O_RDWR|O_APPEND, 0777);
+                            page_cache_read_ret = read(page_cache_fd, page_cache_list, MAXBUF);
                             
-                            //write to client
-                            n = write(connfd, server_data, readret);
-                            if(n<0){
-                                perror("Error in write\n\r");
-                                printf("Write error!\n\r");
+                            //close fd
+                            page_cache_ret = strstr(page_cache_list,server_path);
+
+                            if(page_cache_ret==NULL){
+
+                                page_no++;
+                                sprintf(page_request,"%s\n%d\n\r",server_path,page_no);
+                                write(page_cache_fd,page_request,strlen(page_request));
+
+                                close(page_cache_fd);
+
+                                write(server_sock, server_path, strlen(server_path));
+                                //write(server_sock,"GET /\r\n",strlen("GET /\r\n"));
+
+                                bzero(server_data, MAXBUF);
+
+                                page_no_fd = 
+
+                                while((readret = read(server_sock, server_data, 4000))>0){
+                                    fprintf(stderr, "%s", server_data);
+                                    printf("%s\n",server_data);
+                                    
+                                    //write to client
+                                    n = write(connfd, server_data, readret);
+                                    if(n<0){
+                                        perror("Error in write\n\r");
+                                        printf("Write error!\n\r");
+                                    }
+
+                                    bzero(server_data, MAXBUF);
+                                }
                             }
 
-                            bzero(server_data, MAXBUF);
-                        }
-                        printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~CAME OUT~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\r");
-                // }
 
-                // else{
-                //         printf("ERROR 403 Forbidden\n\r");
-                //         write(connfd, "ERROR 403 Forbidden\n\r",strlen("ERROR 403 Forbidden\n\r"));
-                // }
+                        }
+                }
+
+                else{
+                        printf("ERROR 403 Forbidden\n\r");
+                        write(connfd, "ERROR 403 Forbidden\n\r",strlen("ERROR 403 Forbidden\n\r"));
+                }
 
                 //shutdown(server_sock, SHUT_RDWR);
                 //close(server_sock);
@@ -351,4 +484,3 @@ int open_listenfd(int port)
         return -1;
     return listenfd;
 } /* end open_listenfd */
-

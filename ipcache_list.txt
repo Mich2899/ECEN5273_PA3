@@ -1,0 +1,11 @@
+netsys.cs.colorado.edu
+198.59.7.17
+ajax.googleapis.com
+142.250.72.10
+detectportal.firefox.com
+34.107.221.82
+neverssl.com
+18.65.229.99
+web.cs.wpi.edu
+130.215.29.52
+
