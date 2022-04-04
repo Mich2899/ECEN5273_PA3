@@ -255,10 +255,13 @@ bool serve_request(char buf[MAXBUF], int connfd)
     char RET_PAGE_SAVE[MAXBUF];
     char page_no_str[100];
     char* find_pgno_str=NULL;
+    char* find_int_str=NULL;
+    char find_pg_no_str[100];
 
     int server_sock=0;
     int page_data_wrret=0;
     int page_data_rret=0;
+    char* find_pgno_ret=NULL;
     //char filetype_ret[MAXLINE];
 
     //     //check if the request has connection:keep alive message
@@ -358,6 +361,7 @@ bool serve_request(char buf[MAXBUF], int connfd)
                                 printf("PAGE_NO:%d********************\n\r",page_no);
 
                                 sprintf(page_request,"%s%d\n\r",server_path,page_no);
+                                printf("PAGE_REQUEST:%s*******************************\n\r",page_request);
                                 write(page_cache_fd,page_request,strlen(page_request));
 
                                 close(page_cache_fd);
@@ -396,8 +400,11 @@ bool serve_request(char buf[MAXBUF], int connfd)
                                 printf("GIVES DATA FROM CACHED PAGE\n\r");
 
                                 find_pgno_str = strstr(page_cache_ret,"\r\n\r\n");
+                                strncpy(find_pg_no_str,find_pgno_str+4,10);
+                                
+                                find_int_str = strstr(find_pg_no_str,"\n\r");
 
-                                strncpy(page_no_str,find_pgno_str+1,1);
+                                strncpy(page_no_str,find_pgno_str+4,((find_pgno_str+4)-find_int_str));
                                 ret_page_no = atoi(page_no_str);
                                 printf("RET_PAGE_NO:%d********************\n\r",ret_page_no);
 

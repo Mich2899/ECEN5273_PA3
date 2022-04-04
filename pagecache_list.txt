@@ -1,0 +1,85 @@
+GET http://netsys.cs.colorado.edu/ HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+1
+GET http://netsys.cs.colorado.edu/fancybox/jquery.mousewheel-3.0.4.pack.js HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+2
+GET http://netsys.cs.colorado.edu/fancybox/jquery.fancybox-1.3.4.pack.js HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+3
+GET http://netsys.cs.colorado.edu/fancybox/jquery.fancybox-1.3.4.css HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+4
+GET http://netsys.cs.colorado.edu/css/style.css HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+5
+GET http://ajax.googleapis.com/ajax/libs/jquery/1.4/jquery.min.js HTTP/1.1
+Host: ajax.googleapis.com
+
+6
+GET http://netsys.cs.colorado.edu/graphics/pdf.gif HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+7
+GET http://netsys.cs.colorado.edu/images/welcome.png HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+8
+GET http://netsys.cs.colorado.edu/graphics/mov.gif HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+9
+GET http://netsys.cs.colorado.edu/graphics/txt.gif HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+10
+GET http://detectportal.firefox.com/canonical.html HTTP/1.1
+Host: detectportal.firefox.com
+
+11
+GET http://detectportal.firefox.com/success.txt?ipv4 HTTP/1.1
+Host: detectportal.firefox.com
+
+12
+GET http://detectportal.firefox.com/success.txt?ipv6 HTTP/1.1
+Host: detectportal.firefox.com
+
+13
+GET http://netsys.cs.colorado.edu/images/wine3.jpg HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+14
+GET http://netsys.cs.colorado.edu/favicon.ico HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+15
+GET http://netsys.cs.colorado.edu/images/apple_ex.png HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+16
+GET http://netsys.cs.colorado.edu/images/exam.gif HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+17
+GET http://netsys.cs.colorado.edu/files/text1.txt HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+18
+GET http://web.cs.wpi.edu/~rek/Grad_Nets/Spring2013/Program0_S13.pdf HTTP/1.1
+Host: web.cs.wpi.edu
+
+19
+GET http://web.cs.wpi.edu/favicon.ico HTTP/1.1
+Host: web.cs.wpi.edu
+
+20
+GET http://netsys.cs.colorado.edu/graphics/html.gif HTTP/1.1
+Host: netsys.cs.colorado.edu
+
+21
+
