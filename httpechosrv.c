@@ -34,6 +34,7 @@ int open_listenfd(int port);
 void echo(int connfd);
 void *thread(void *vargp);
 int input_port=0;
+int page_no=0; 
 
 void error_on_server(int connfd, char* err_msg){
         char error_msg[]="HTTP/1.1 500 Internal Server Error";
@@ -247,12 +248,17 @@ bool serve_request(char buf[MAXBUF], int connfd)
     char page_cache_list[MAXBUF];
     int page_cache_read_ret=0;
     char* page_cache_ret=NULL;
-    int page_no=0;
+    int ret_page_no=0;
     char page_request[MAXBUF];
-    int page_no_fd=0;
+    int page_no_fd=0; int ret_page_no_fd=0;
     char PAGE_SAVE[MAXBUF];
+    char RET_PAGE_SAVE[MAXBUF];
+    char page_no_str[100];
+    char* find_pgno_str=NULL;
 
     int server_sock=0;
+    int page_data_wrret=0;
+    int page_data_rret=0;
     //char filetype_ret[MAXLINE];
 
     //     //check if the request has connection:keep alive message
@@ -341,13 +347,17 @@ bool serve_request(char buf[MAXBUF], int connfd)
                             page_cache_fd = open(PAGE_CACHE_FILE, O_CREAT|O_RDWR|O_APPEND, 0777);
                             page_cache_read_ret = read(page_cache_fd, page_cache_list, MAXBUF);
                             
-                            //close fd
+                            //check for request in file
                             page_cache_ret = strstr(page_cache_list,server_path);
 
                             if(page_cache_ret==NULL){
 
-                                page_no++;
-                                sprintf(page_request,"%s\n%d\n\r",server_path,page_no);
+                                printf("GIVES DATA FROM SERVER\n\r");
+
+                                page_no+=1;
+                                printf("PAGE_NO:%d********************\n\r",page_no);
+
+                                sprintf(page_request,"%s%d\n\r",server_path,page_no);
                                 write(page_cache_fd,page_request,strlen(page_request));
 
                                 close(page_cache_fd);
@@ -357,7 +367,9 @@ bool serve_request(char buf[MAXBUF], int connfd)
 
                                 bzero(server_data, MAXBUF);
 
-                                page_no_fd = 
+                                sprintf(PAGE_SAVE,"%s%d",PAGE,page_no);
+
+                                page_no_fd = open(PAGE_SAVE, O_CREAT|O_RDWR,0777);
 
                                 while((readret = read(server_sock, server_data, 4000))>0){
                                     fprintf(stderr, "%s", server_data);
@@ -370,8 +382,47 @@ bool serve_request(char buf[MAXBUF], int connfd)
                                         printf("Write error!\n\r");
                                     }
 
+                                    //write in page save file
+                                    page_data_wrret = write(page_no_fd,server_data,readret);
+
                                     bzero(server_data, MAXBUF);
                                 }
+
+                                close(page_no_fd);
+                            }
+
+                            else{
+
+                                printf("GIVES DATA FROM CACHED PAGE\n\r");
+
+                                find_pgno_str = strstr(page_cache_ret,"\r\n\r\n");
+
+                                strncpy(page_no_str,find_pgno_str+1,1);
+                                ret_page_no = atoi(page_no_str);
+                                printf("RET_PAGE_NO:%d********************\n\r",ret_page_no);
+
+                                sprintf(RET_PAGE_SAVE,"%s%d",PAGE,ret_page_no);
+
+                                ret_page_no_fd = open(RET_PAGE_SAVE, O_CREAT|O_RDWR,0777);
+
+                                bzero(server_data, MAXBUF);
+
+                                while((readret = read(ret_page_no_fd, server_data, 4000))>0){
+                                    fprintf(stderr, "%s", server_data);
+                                    printf("%s\n",server_data);
+                                    
+                                    //write to client
+                                    n = write(connfd, server_data, readret);
+                                    if(n<0){
+                                        perror("Error in write\n\r");
+                                        printf("Write error!\n\r");
+                                    }
+
+                                    bzero(server_data, MAXBUF);
+                                }  
+
+                                close(ret_page_no_fd);                              
+
                             }
 
 
